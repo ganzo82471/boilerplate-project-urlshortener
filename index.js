@@ -23,74 +23,68 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
   const Url = mongoose.model('Url', urlSchema);
 
 
-
   const dns = require('dns');
 
- 
-
+  // Regular expression to match valid URLs with http/https protocol
+  const urlRegex = /^(https?):\/\/(\w+\.)+\w+\/?(\S*)$/;
+  
+  // POST endpoint to create short URLs
   app.post('/api/shorturl', async (req, res) => {
     const originalUrl = req.body.url;
   
+    // Check if the URL matches the valid format
+    if (!urlRegex.test(originalUrl)) {
+      return res.status(400).json({ error: 'invalid url' });
+    }
+  
     try {
+      // Prepend the URL with a default protocol if it's missing
+      const formattedUrl = originalUrl.startsWith('http') ? originalUrl : `http://${originalUrl}`;
+  
       // Validate the URL using dns.lookup
-      dns.lookup(new URL(originalUrl).hostname, async (err) => {
+      dns.lookup(new URL(formattedUrl).hostname, async (err) => {
         if (err) {
           console.error('Invalid URL:', err);
-          return res.status(400).json({ error: 'Invalid URL' });
+          return res.status(400).json({ error: 'invalid url' });
         }
-    
-        try {
-          // Check if the URL already exists in the database
-          let urlDoc = await Url.findOne({ originalUrl });
-          if (urlDoc) {
-            return res.json({ original_url: originalUrl, short_url: urlDoc.shortUrl });
-          }
-      
-          // Create a new short URL
-          const shortUrlCounter = await Url.countDocuments() + 1;
-          urlDoc = new Url({ originalUrl, shortUrl: shortUrlCounter });
-          await urlDoc.save();
-      
-          res.json({ original_url: originalUrl, short_url: urlDoc.shortUrl });
-        } catch (err) {
-          console.error('Error creating short URL:', err);
-          res.status(500).json({ error: 'Internal Server Error' });
+  
+        // Check if the URL already exists in the database
+        let urlDoc = await Url.findOne({ originalUrl: formattedUrl });
+        if (urlDoc) {
+          return res.json({ original_url: formattedUrl, short_url: urlDoc.shortUrl });
         }
+  
+        // Create a new short URL
+        const shortUrlCounter = await Url.countDocuments() + 1;
+        urlDoc = new Url({ originalUrl: formattedUrl, shortUrl: shortUrlCounter });
+        await urlDoc.save();
+  
+        res.json({ original_url: formattedUrl, short_url: urlDoc.shortUrl });
       });
-    } catch (err) {
-      console.error('Invalid URL:', err);
-      return res.status(400).json({ error: 'Invalid URL' });
+    } catch (error) {
+      console.error('Error parsing URL:', error);
+      res.status(400).json({ error: 'invalid url' });
     }
   });
   
-
-
- // GET endpoint to redirect to the original URL
- app.get('/api/shorturl/:shortUrl', async (req, res) => {
-  const shortUrl = parseInt(req.params.shortUrl);
-
-  // Check if shortUrl is a valid number
-  if (isNaN(shortUrl)) {
-    return res.status(400).json({ error: 'Invalid short URL' });
-  }
-
-  try {
-    console.log('Retrieving URL for short code:', shortUrl);
-    const urlDoc = await Url.findOne({ shortUrl });
-    console.log('Retrieved:', shortUrl, '->', urlDoc);
-
-    if (urlDoc) {
-      console.log('Redirecting to:', urlDoc.originalUrl);
-      return res.redirect(urlDoc.originalUrl);
-    } else {
-      console.log('Short URL not found');
-      return res.json({ error: 'Short URL not found' });
+  
+  
+  // GET endpoint to redirect to the original URL
+  app.get('/api/shorturl/:shortUrl', async (req, res) => {
+    const shortUrl = parseInt(req.params.shortUrl);
+  
+    try {
+      const urlDoc = await Url.findOne({ shortUrl });
+      if (urlDoc) {
+        return res.redirect(urlDoc.originalUrl);
+      } else {
+        return res.json({ error: 'Short URL not found' });
+      }
+    } catch (err) {
+      console.error('Error retrieving short URL:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
     }
-  } catch (err) {
-    console.error('Error retrieving short URL:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
+  });
 
 
 
